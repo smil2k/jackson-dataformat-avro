@@ -9,22 +9,23 @@ import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.dataformat.avro.AvroGenerator;
 
 /**
- * Alternative to {@link ObjectWriteContext} that needs to be used with
- * Avro Map datatype.
+ * Alternative to {@link ObjectWriteContext} that needs to be used with Avro Map datatype.
  */
 public final class MapWriteContext
-    extends KeyValueContext
+        extends KeyValueContext
 {
-    protected final Map<String,Object> _data;
-    
+    protected final Map<String, Object> _data;
+
     public MapWriteContext(AvroWriteContext parent, AvroGenerator generator, Schema schema)
     {
         super(parent, generator, schema);
-        _data = new HashMap<String,Object>();
+        _data = new HashMap<String, Object>();
     }
 
     @Override
-    public Object rawValue() { return _data; }
+    public Object rawValue() {
+        return _data;
+    }
 
     @Override
     public final boolean writeFieldName(String name)
@@ -33,7 +34,7 @@ public final class MapWriteContext
         _expectValue = true;
         return true;
     }
-    
+
     @Override
     public final AvroWriteContext createChildArrayContext() {
         _verifyValueWrite();
@@ -46,7 +47,7 @@ public final class MapWriteContext
     public final AvroWriteContext createChildObjectContext() throws JsonMappingException
     {
         _verifyValueWrite();
-        AvroWriteContext child = _createObjectContext(_schema.getElementType());
+        AvroWriteContext child = _createObjectContext(_schema.getValueType());
         _data.put(_currentName, child.rawValue());
         return child;
     }
@@ -62,7 +63,7 @@ public final class MapWriteContext
         _verifyValueWrite();
         _data.put(_currentName, value);
     }
-    
+
     protected final void _verifyValueWrite() {
         if (!_expectValue) {
             throw new IllegalStateException("Expecting FIELD_NAME, not value");
