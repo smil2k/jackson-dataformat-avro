@@ -49,4 +49,8 @@ public class DefinedSchemas
             throw new IllegalStateException("Trying to re-define schema for type "+type);
         }
     }
+    
+    public void removeSchema(JavaType type) {
+        _schemas.remove(type);
+    }
 }

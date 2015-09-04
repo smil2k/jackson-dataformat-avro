@@ -5,34 +5,37 @@ import com.fasterxml.jackson.databind.jsonFormatVisitors.JsonFormatVisitable;
 import com.fasterxml.jackson.databind.jsonFormatVisitors.JsonObjectFormatVisitor;
 import com.fasterxml.jackson.databind.ser.BeanPropertyWriter;
 import com.fasterxml.jackson.dataformat.avro.AvroFixedSize;
+import com.fasterxml.jackson.annotation.JsonUnwrapped;
+import com.fasterxml.jackson.databind.util.NameTransformer;
+
 import org.apache.avro.Schema;
 
 import java.util.ArrayList;
 import java.util.List;
+import org.apache.avro.Schema.Field;
 
 public class RecordVisitor
-    extends JsonObjectFormatVisitor.Base
-    implements SchemaBuilder
-{
+        extends JsonObjectFormatVisitor.Base
+        implements SchemaBuilder {
+
     protected final JavaType _type;
 
     protected final DefinedSchemas _schemas;
 
     protected Schema _avroSchema;
-    
+
     protected List<Schema.Field> _fields = new ArrayList<Schema.Field>();
-    
-    public RecordVisitor(SerializerProvider p, JavaType type, DefinedSchemas schemas)
-    {
+
+    public RecordVisitor(SerializerProvider p, JavaType type, DefinedSchemas schemas) {
         super(p);
         _type = type;
         _schemas = schemas;
         _avroSchema = Schema.createRecord(AvroSchemaHelper.getName(type),
-                "Schema for "+type.toCanonical(),
+                "Schema for " + type.toCanonical(),
                 AvroSchemaHelper.getNamespace(type), false);
         schemas.addSchema(type, _avroSchema);
     }
-    
+
     @Override
     public Schema builtAvroSchema() {
         // Assumption now is that we are done, so let's assign fields
@@ -41,22 +44,21 @@ public class RecordVisitor
     }
 
     /*
-    /**********************************************************
-    /* JsonObjectFormatVisitor implementation
-    /**********************************************************
+     /**********************************************************
+     /* JsonObjectFormatVisitor implementation
+     /**********************************************************
      */
-    
     @Override
-    public void property(BeanProperty writer) throws JsonMappingException
-    {
+    public void property(BeanProperty writer) throws JsonMappingException {
         Schema schema = schemaForWriter(writer);
-        _fields.add(new Schema.Field(writer.getName(), schema, null, null));
+        if (schema != null) {
+            _fields.add(new Schema.Field(writer.getName(), schema, null, null));
+        }
     }
 
     @Override
     public void property(String name, JsonFormatVisitable handler,
-            JavaType type) throws JsonMappingException
-    {
+                         JavaType type) throws JsonMappingException {
         VisitorFormatWrapperImpl wrapper = new VisitorFormatWrapperImpl(_schemas, getProvider());
         handler.acceptJsonFormatVisitor(wrapper, type);
         Schema schema = wrapper.getAvroSchema();
@@ -66,20 +68,21 @@ public class RecordVisitor
     @Override
     public void optionalProperty(BeanProperty writer) throws JsonMappingException {
         Schema schema = schemaForWriter(writer);
-        /* 23-Nov-2012, tatu: Actually let's also assume that primitive type values
-         *   are required, as Jackson does not distinguish whether optional has been
-         *   defined, or is merely the default setting.
-         */
-        if (!writer.getType().isPrimitive()) {
-            schema = AvroSchemaHelper.unionWithNull(schema);
+        if (schema != null) {
+            /*
+             * 23-Nov-2012, tatu: Actually let's also assume that primitive type values are required, as Jackson does
+             * not distinguish whether optional has been defined, or is merely the default setting.
+             */
+            if (!writer.getType().isPrimitive()) {
+                schema = AvroSchemaHelper.unionWithNull(schema);
+            }
+            _fields.add(new Schema.Field(writer.getName(), schema, null, null));
         }
-        _fields.add(new Schema.Field(writer.getName(), schema, null, null));
     }
 
     @Override
     public void optionalProperty(String name, JsonFormatVisitable handler,
-            JavaType type) throws JsonMappingException
-    {
+                                 JavaType type) throws JsonMappingException {
         VisitorFormatWrapperImpl wrapper = new VisitorFormatWrapperImpl(_schemas, getProvider());
         handler.acceptJsonFormatVisitor(wrapper, type);
         Schema schema = wrapper.getAvroSchema();
@@ -90,13 +93,11 @@ public class RecordVisitor
     }
 
     /*
-    /**********************************************************************
-    /* Internal methods
-    /**********************************************************************
+     /**********************************************************************
+     /* Internal methods
+     /**********************************************************************
      */
-    
-    protected Schema schemaForWriter(BeanProperty prop) throws JsonMappingException
-    {
+    protected Schema schemaForWriter(BeanProperty prop) throws JsonMappingException {
         AvroFixedSize fixedSize = prop.getAnnotation(AvroFixedSize.class);
         if (fixedSize != null) {
             return Schema.createFixed(fixedSize.typeName(), null, fixedSize.typeNamespace(), fixedSize.size());
@@ -116,8 +117,29 @@ public class RecordVisitor
             }
             ser = prov.findValueSerializer(prop.getType(), prop);
         }
-        VisitorFormatWrapperImpl visitor = new VisitorFormatWrapperImpl(_schemas, prov);
-        ser.acceptJsonFormatVisitor(visitor, prop.getType());
-        return visitor.getAvroSchema();
+
+        JsonUnwrapped unwrap = prop.getAnnotation(JsonUnwrapped.class);
+        if (unwrap != null) {
+            NameTransformer unwrapper = NameTransformer.simpleTransformer(unwrap.prefix(), unwrap.suffix());
+            ser.unwrappingSerializer(unwrapper);
+            // Need to remove this type first, so the next visitor can put it back if necessary.
+            _schemas.removeSchema(_type);
+            VisitorFormatWrapperImpl visitor = new VisitorFormatWrapperImpl(_schemas, prov);
+            ser.acceptJsonFormatVisitor(visitor, prop.getType());
+
+            for (Field field : visitor.getAvroSchema().getFields()) {
+                _fields.add(
+                        new Field(unwrapper.transform(field.name()),
+                                field.schema(),
+                                field.doc(),
+                                field.defaultValue()));
+            }
+            return null;
+        } else {
+            VisitorFormatWrapperImpl visitor = new VisitorFormatWrapperImpl(_schemas, prov);
+            ser.acceptJsonFormatVisitor(visitor, prop.getType());
+
+            return visitor.getAvroSchema();
+        }
     }
 }
